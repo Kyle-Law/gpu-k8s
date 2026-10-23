@@ -10,9 +10,20 @@ need_kube
 kubectl get deploy traefik -n kube-system >/dev/null 2>&1 \
   || die "Traefik is not running in kube-system (was k3s installed with --disable traefik?)."
 
-step "Gateway API: CRDs ($GATEWAY_API_VERSION, standard channel)"
-kubectl apply --server-side -f \
-  "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
+step "Gateway API: CRDs"
+# Recent k3s ships the Gateway API CRDs itself (via its Helm-managed traefik-crd chart).
+# Applying our own copy then fails with server-side-apply conflicts, so only install them
+# when they are missing.
+if kubectl get crd gateways.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+  have=$(kubectl get crd gateways.gateway.networking.k8s.io \
+    -o jsonpath='{.metadata.annotations.gateway\.networking\.k8s\.io/bundle-version}' 2>/dev/null || true)
+  info "Gateway API CRDs already present (bundle ${have:-unknown}); leaving them alone."
+  [ "$have" = "$GATEWAY_API_VERSION" ] || info "(Traefik 3.7 documents support for $GATEWAY_API_VERSION; a nearby version is normally fine.)"
+else
+  info "Installing Gateway API CRDs $GATEWAY_API_VERSION (standard channel)"
+  kubectl apply --server-side -f \
+    "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
+fi
 
 step "Gateway API: enable Traefik's Gateway provider"
 # k3s merges a HelmChartConfig named after its bundled chart into the chart's values.

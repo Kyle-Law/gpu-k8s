@@ -100,8 +100,8 @@ tools/gateway.sh test          # request through the gateway: 401 without creden
 ```
 
 k3s's bundled Traefik doubles as the Gateway API controller, so there is nothing extra to run.
-The phase installs the Gateway API CRDs (`GATEWAY_API_VERSION`, default v1.6.3, the version Traefik
-3.7 documents support for), turns on Traefik's Gateway provider through a `HelmChartConfig`, and
+The phase installs the Gateway API CRDs only if they are missing (recent k3s already ships them;
+`GATEWAY_API_VERSION`, default v1.6.3, is what Traefik 3.7 documents support for), turns on Traefik's Gateway provider through a `HelmChartConfig`, and
 creates an `HTTPRoute` that sends `/v1/*` to the llm-d router. A Traefik `Middleware` (attached with an
 `ExtensionRef` filter) requires basic auth; the password is generated once and kept in a Secret.
 
