@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # llm-d router (standalone mode) + a vLLM model server sized for ONE GPU.
 # The model server flags depend on the GPU profile (see lib/common.sh).
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 need_kube
 
 step "llm-d: settings"

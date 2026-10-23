@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the NVIDIA driver if it is missing.
 # Exit code 10 means "reboot required": reboot, then re-run ./setup.sh.
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 
 step "NVIDIA driver"
 if driver_ok; then

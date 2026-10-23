@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NVIDIA container toolkit. Must be installed BEFORE k3s so k3s auto-detects the nvidia runtime.
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 
 step "NVIDIA container toolkit"
 if dpkg -s nvidia-container-toolkit >/dev/null 2>&1; then

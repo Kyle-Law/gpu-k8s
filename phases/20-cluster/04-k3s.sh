@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Single-node k3s + kubeconfig for the current user.
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 
 step "k3s"
 if ! command -v k3s >/dev/null 2>&1; then

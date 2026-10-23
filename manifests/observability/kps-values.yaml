@@ -1,0 +1,52 @@
+# kube-prometheus-stack values for a single-node k3s VM.
+# Prometheus + Grafana + node-exporter + kube-state-metrics; no Alertmanager.
+
+alertmanager:
+  enabled: false
+
+# k3s runs etcd / controller-manager / scheduler / kube-proxy inside the k3s process,
+# so the usual scrape targets don't exist and would show up as permanently "down".
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+grafana:
+  defaultDashboardsTimezone: browser
+  service:
+    type: ClusterIP            # reach it with tools/grafana.sh (port-forward over SSH)
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard # any ConfigMap with this label becomes a dashboard
+      searchNamespace: ALL
+
+prometheus:
+  prometheusSpec:
+    retention: 3d
+    # Pick up every PodMonitor / ServiceMonitor / rule in any namespace, not only ones
+    # labelled with this Helm release.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    podMonitorNamespaceSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    ruleNamespaceSelector: {}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi    # k3s default StorageClass is local-path
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi

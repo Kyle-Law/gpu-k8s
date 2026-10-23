@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ollama (llama.cpp): simplest way to serve a model on a single GPU.
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 need_kube
 
 step "Ollama: deploy"

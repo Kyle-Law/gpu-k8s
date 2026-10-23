@@ -1,0 +1,16 @@
+# Scrapes the vLLM model server pods that llm-d creates (port `modelserver` = 8000).
+# Applied into the llm-d namespace by phases/40-observability/install.sh.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vllm-model-server
+  labels:
+    app: vllm-model-server
+spec:
+  selector:
+    matchLabels:
+      llm-d.ai/guide: optimized-baseline
+  podMetricsEndpoints:
+    - port: modelserver
+      path: /metrics
+      interval: 15s

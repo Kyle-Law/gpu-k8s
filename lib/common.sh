@@ -55,6 +55,10 @@ case "$GPU_PROFILE" in legacy|modern) ;; *) echo "ERROR: GPU_PROFILE must be leg
 : "${LLMD_BRANCH:=release-1.0}"
 : "${LLMD_DIR:=$HOME/llm-d}"
 : "${VLLM_EXTRA_ARGS:=}"              # extra space-separated vLLM flags
+: "${OBSERVABILITY:=0}"               # 1 = also install Prometheus + Grafana + DCGM (setup.sh --observability)
+: "${MONITORING_NS:=monitoring}"
+: "${KPS_CHART_VERSION:=}"            # kube-prometheus-stack chart version (empty = latest)
+: "${DCGM_CHART_VERSION:=}"           # dcgm-exporter chart version (empty = latest)
 
 if [ "$GPU_PROFILE" = legacy ]; then
   : "${MODEL:=Qwen/Qwen3-0.6B}"
@@ -78,7 +82,7 @@ fi
 : "${MS_SHM:=4Gi}"
 
 DECODE_DEPLOY="optimized-baseline-nvidia-gpu-vllm-decode"
-EXIT_REBOOT=10                        # steps/01-driver.sh exits with this when a reboot is needed
+EXIT_REBOOT=10                        # phases/10-host/01-driver.sh exits with this when a reboot is needed
 
 # ---- helpers ------------------------------------------------------------------
 step() { printf '\n==> %s\n' "$*"; }
@@ -87,7 +91,7 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 need_kube() {
   if ! command -v kubectl >/dev/null 2>&1 || [ ! -f "$KUBECONFIG" ]; then
-    die "k3s is not set up yet. Run steps/04-k3s.sh first (or ./setup.sh)."
+    die "k3s is not set up yet. Run phases/20-cluster/04-k3s.sh first (or ./setup.sh)."
   fi
 }
 
@@ -104,6 +108,9 @@ fix_home_ownership() {
     fi
   done
 }
+
+# check_url <url>  -> 0 if the host answers over HTTPS within 10 s (any HTTP status counts)
+check_url() { curl -sS -o /dev/null -m 10 "$1" 2>/dev/null; }
 
 wait_node_ready() { until kubectl get node 2>/dev/null | grep -q " Ready"; do sleep 3; done; }
 

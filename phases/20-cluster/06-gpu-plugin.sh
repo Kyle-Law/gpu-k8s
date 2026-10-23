@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # RuntimeClass `nvidia` + NVIDIA device plugin, then wait until the GPU is allocatable.
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 need_kube
 
 step "RuntimeClass + NVIDIA device plugin"
