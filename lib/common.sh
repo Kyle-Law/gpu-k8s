@@ -91,6 +91,20 @@ need_kube() {
   fi
 }
 
+# An earlier `sudo` command can leave ~/.config or ~/.cache root-owned, which makes helm
+# fail with "mkdir ~/.config/helm: permission denied". Hand them back to the current user.
+fix_home_ownership() {
+  [ "$(id -u)" -ne 0 ] || return 0
+  local d
+  for d in "$HOME/.config" "$HOME/.cache"; do
+    [ -d "$d" ] || continue
+    if [ -n "$(find "$d" ! -user "$(id -un)" -print -quit 2>/dev/null)" ]; then
+      info "Fixing ownership of $d (some entries were owned by another user)"
+      $SUDO chown -R "$(id -u):$(id -g)" "$d"
+    fi
+  done
+}
+
 wait_node_ready() { until kubectl get node 2>/dev/null | grep -q " Ready"; do sleep 3; done; }
 
 deploy_exists() { kubectl get deploy "$1" -n "$2" >/dev/null 2>&1; }

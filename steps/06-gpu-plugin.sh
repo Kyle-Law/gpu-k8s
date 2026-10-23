@@ -15,6 +15,7 @@ EOF
 if ! command -v helm >/dev/null 2>&1; then
   curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 fi
+fix_home_ownership
 helm repo add nvdp https://nvidia.github.io/k8s-device-plugin --force-update
 helm repo update nvdp
 helm upgrade -i nvdp nvdp/nvidia-device-plugin \

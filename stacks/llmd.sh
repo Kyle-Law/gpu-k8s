@@ -32,6 +32,7 @@ kubectl create secret generic llm-d-hf-token \
   --namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 step "llm-d: router (standalone)"
+fix_home_ownership
 helm upgrade -i "$GUIDE_NAME" "$ROUTER_STANDALONE_CHART" \
   -f guides/recipes/router/base.values.yaml \
   -f guides/optimized-baseline/router/optimized-baseline.values.yaml \
