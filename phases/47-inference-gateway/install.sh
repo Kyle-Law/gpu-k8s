@@ -23,13 +23,30 @@ deploy_exists "$DECODE_DEPLOY" "$NAMESPACE" \
 kubectl get crd inferencepools.inference.networking.k8s.io >/dev/null 2>&1 \
   || die "InferencePool CRD missing (phases/30-inference/llmd.sh installs it)."
 
+# diagnose <namespace>: why pods there are not Ready (status, scheduler/pull events, logs)
+diagnose() {
+  echo "!!! Pods in $1:"
+  kubectl get pods -n "$1" -o wide || true
+  local p
+  for p in $(kubectl get pods -n "$1" -o name 2>/dev/null); do
+    if ! kubectl get -n "$1" "$p" -o jsonpath='{.status.containerStatuses[*].ready}' | grep -q true; then
+      echo "--- $p: events"
+      kubectl describe -n "$1" "$p" | sed -n '/^Events:/,$p' | tail -15
+      echo "--- $p: logs (current, then previous crash)"
+      kubectl logs -n "$1" "$p" --all-containers --tail=40 2>&1 || true
+      kubectl logs -n "$1" "$p" --all-containers --previous --tail=40 2>/dev/null || true
+    fi
+  done
+}
+
 step "agentgateway $AGENTGATEWAY_VERSION (Gateway API controller with Inference Extension support)"
 fix_home_ownership
 helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds \
   --namespace "$AGW_NS" --create-namespace --version "$AGENTGATEWAY_VERSION" --wait
 helm upgrade -i agentgateway oci://cr.agentgateway.dev/charts/agentgateway \
   --namespace "$AGW_NS" --version "$AGENTGATEWAY_VERSION" \
-  --set inferenceExtension.enabled=true --wait --timeout 5m
+  --set inferenceExtension.enabled=true --wait --timeout 5m \
+  || { diagnose "$AGW_NS"; die "agentgateway controller did not become Ready (details above)."; }
 kubectl wait --for=condition=Accepted gatewayclass/agentgateway --timeout=120s
 
 step "Gateway '$IGW_GATEWAY' (class agentgateway, ClusterIP only)"
@@ -65,7 +82,9 @@ spec:
         namespaces:
           from: All
 YAML
-kubectl wait --for=condition=Programmed gateway/"$IGW_GATEWAY" -n "$NAMESPACE" --timeout=180s
+kubectl wait --for=condition=Programmed gateway/"$IGW_GATEWAY" -n "$NAMESPACE" --timeout=180s \
+  || { kubectl describe gateway "$IGW_GATEWAY" -n "$NAMESPACE" | sed -n '/^Status:/,$p'; diagnose "$NAMESPACE"; diagnose "$AGW_NS"
+       die "Gateway $IGW_GATEWAY not Programmed (details above)."; }
 
 step "llm-d router, gateway mode (release '$IGW_RELEASE': EPP + InferencePool + HTTPRoute)"
 # Subshell: llm-d's env.sh exports its own versions (e.g. GATEWAY_API_VERSION) that must not leak.
@@ -82,7 +101,7 @@ step "llm-d router, gateway mode (release '$IGW_RELEASE': EPP + InferencePool + 
     --set httpRoute.create=true \
     --set httpRoute.inferenceGatewayName="$IGW_GATEWAY" \
     -n "$NAMESPACE" --version "$ROUTER_CHART_VERSION" --wait --timeout 10m
-)
+) || { diagnose "$NAMESPACE"; die "Gateway-mode router ($IGW_RELEASE) did not become Ready (details above)."; }
 
 info "HTTPRoute '$IGW_RELEASE' -> backendRef: $(kubectl get httproute "$IGW_RELEASE" -n "$NAMESPACE" \
   -o jsonpath='{.spec.rules[0].backendRefs[0].kind}/{.spec.rules[0].backendRefs[0].name}')"
