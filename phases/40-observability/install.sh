@@ -35,11 +35,14 @@ step "Observability: vLLM scrape config + dashboard"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -n "$NAMESPACE" -f "$OBS/vllm-podmonitor.yaml"
 
-for f in "$OBS"/dashboards/*.json; do
+# dashboards/<folder>/*.json  ->  one ConfigMap each, shown in a Grafana folder named <folder>
+for f in "$OBS"/dashboards/*/*.json; do
+  folder=$(basename "$(dirname "$f")")
   name="dashboard-$(basename "$f" .json)"
   kubectl create configmap "$name" -n "$MONITORING_NS" --from-file="$(basename "$f")=$f" \
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl label configmap "$name" -n "$MONITORING_NS" grafana_dashboard=1 --overwrite
+  kubectl annotate configmap "$name" -n "$MONITORING_NS" grafana_folder="$folder" --overwrite
 done
 
 step "Observability: llm-d router (EPP) metrics (best effort)"
@@ -74,5 +77,5 @@ cat <<EOF
       tools/grafana.sh               # prints the admin password + port-forwards Grafana to :3000
       tools/grafana.sh prometheus    # Prometheus UI on :9090
     From your laptop:  ssh -L 3000:localhost:3000 <user>@<vm-ip>   then open http://localhost:3000
-    Dashboard: "GPU + vLLM (gpu-k8s)".  Ollama has no Prometheus endpoint, so only GPU panels fill for it.
+    Dashboards: folder "gpu-k8s" ("GPU + vLLM") and folder "llm-d" (vLLM overview, KV cache, saturation, drill-down, router).  Ollama has no Prometheus endpoint, so only GPU panels fill for it.
 EOF

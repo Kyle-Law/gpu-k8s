@@ -30,6 +30,9 @@ grafana:
       enabled: true
       label: grafana_dashboard # any ConfigMap with this label becomes a dashboard
       searchNamespace: ALL
+      folderAnnotation: grafana_folder   # ConfigMap annotation naming the Grafana folder
+      provider:
+        foldersFromFilesStructure: true
 
 prometheus:
   prometheusSpec:

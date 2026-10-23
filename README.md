@@ -90,6 +90,7 @@ tools/
   switch-stack.sh          swap which stack holds the GPU
   gateway.sh               gateway URL + credentials, or a test request through it
   grafana.sh               port-forward Grafana / Prometheus
+  metrics.sh               which LLM/GPU metrics Prometheus has; which dashboards will fill in
   check-image.sh           does an image's PyTorch support this GPU?
   teardown.sh              remove ollama | llmd | gateway | observability | k3s
 ```
@@ -145,7 +146,12 @@ What gets installed (namespace `monitoring`):
 | DCGM exporter (`dcgm`) | GPU utilisation, VRAM, power, temperature. Runs under the `nvidia` RuntimeClass without requesting the GPU, so it does not compete with the model server |
 | `PodMonitor` for vLLM | queue depth, KV-cache usage, tokens/s, TTFT, inter-token and end-to-end latency, prefix-cache hit rate |
 | `ServiceMonitor` for the llm-d router | routing metrics (best effort; the endpoint may require auth) |
-| Dashboard "GPU + vLLM (gpu-k8s)" | all of the above, auto-imported |
+| Dashboards (auto-imported, in two Grafana folders) | **gpu-k8s**: "GPU + vLLM" (GPU, queue, throughput, latency; handles old and new vLLM metric names). **llm-d**: the project's own vLLM overview, KV-cache performance, failure & saturation, diagnostic drill-down and router dashboards (copied from llm-d `release-1.0`, see `manifests/observability/dashboards/llm-d/SOURCE.md`) |
+
+`tools/metrics.sh` shows which metric families Prometheus actually has and so which dashboards will fill in
+(`tools/metrics.sh 'ttft|first_token'` lists matching metric names). The llm-d router dashboards need the
+best-effort router scrape; the llm-d dashboards expect current vLLM metric names, so with the `legacy`
+GPU profile (vLLM 0.8.5) some of their panels stay empty.
 
 Ollama has no Prometheus endpoint, so with `--stack ollama` only the GPU and cluster panels fill in.
 Remove it again with `tools/teardown.sh observability`.
