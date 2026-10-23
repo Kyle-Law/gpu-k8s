@@ -16,6 +16,7 @@ git clone https://github.com/Kyle-Law/gpu-k8s.git && cd gpu-k8s
 ./setup.sh                  # validate -> host -> cluster -> llm-d -> verify
 ./setup.sh --stack ollama   # same, but Ollama instead
 ./setup.sh --stack none     # stop after the cluster (k3s + GPU plumbing)
+./setup.sh --gateway        # also expose the model via the Gateway API, behind basic auth
 ./setup.sh --observability  # also install Prometheus + Grafana + GPU/vLLM metrics
 ```
 
@@ -42,7 +43,7 @@ Force a profile with `GPU_PROFILE=legacy|modern`.
 
 ## Phases
 
-`setup.sh` runs six phases in order. Each phase is a directory under `phases/` and every
+`setup.sh` runs these phases in order (gateway and observability are opt-in). Each phase is a directory under `phases/` and every
 script in it also runs on its own.
 
 | Phase | What it does | Scripts |
@@ -51,12 +52,13 @@ script in it also runs on its own.
 | `host` | NVIDIA driver (exit 10 = reboot needed), base tools, container toolkit | `phases/10-host/` |
 | `cluster` | k3s, shell helpers, RuntimeClass + device plugin, GPU smoke test | `phases/20-cluster/` |
 | `inference` | The model server: llm-d (router + vLLM) **or** Ollama | `phases/30-inference/` |
+| `gateway` | *Opt-in.* Exposes the model through the Gateway API (k3s's Traefik as the controller) behind basic auth | `phases/35-gateway/` |
 | `observability` | *Opt-in.* Prometheus, Grafana, DCGM GPU exporter, vLLM + router scraping, dashboard | `phases/40-observability/` |
 | `verify` | End-to-end checks: node, GPU, a real completion, metrics flowing | `phases/50-verify/` |
 
 ```bash
 ./setup.sh --list                    # show the plan
-./setup.sh --only validate           # run one phase (validate|host|cluster|inference|observability|verify)
+./setup.sh --only validate           # run one phase (validate|host|cluster|inference|gateway|observability|verify)
 ./setup.sh --from 06                 # resume at numbered step 06 (steps 00-07 are in validate/host/cluster)
 ./setup.sh --only verify             # re-run the health checks any time
 ```
@@ -64,7 +66,7 @@ script in it also runs on its own.
 ## Layout
 
 ```
-setup.sh                   runner (--stack, --observability, --only, --from, --no-verify, --list)
+setup.sh                   runner (--stack, --gateway, --observability, --only, --from, --no-verify, --list)
 config.env.example         copy to config.env to override defaults
 lib/common.sh              shared settings, GPU detection, helpers
 phases/
@@ -72,6 +74,7 @@ phases/
   10-host/                 01-driver  02-base-tools  03-container-toolkit
   20-cluster/              04-k3s  05-shell-helpers  06-gpu-plugin  07-gpu-smoke-test
   30-inference/            llmd.sh  ollama.sh      (pick one; they share the single GPU)
+  35-gateway/              install.sh
   40-observability/        install.sh
   50-verify/               verify.sh
 manifests/
@@ -81,10 +84,32 @@ tools/
   status.sh                GPU, profile, pods, endpoints
   test.sh                  send a test prompt (llmd | ollama)
   switch-stack.sh          swap which stack holds the GPU
+  gateway.sh               gateway URL + credentials, or a test request through it
   grafana.sh               port-forward Grafana / Prometheus
   check-image.sh           does an image's PyTorch support this GPU?
-  teardown.sh              remove ollama | llmd | observability | k3s
+  teardown.sh              remove ollama | llmd | gateway | observability | k3s
 ```
+
+## Gateway API
+
+```bash
+./setup.sh --gateway           # as part of a full run
+./setup.sh --only gateway      # add it to a cluster that is already up
+tools/gateway.sh               # URL + generated credentials
+tools/gateway.sh test          # request through the gateway: 401 without credentials, answer with them
+```
+
+k3s's bundled Traefik doubles as the Gateway API controller, so there is nothing extra to run.
+The phase installs the Gateway API CRDs (`GATEWAY_API_VERSION`, default v1.6.3, the version Traefik
+3.7 documents support for), turns on Traefik's Gateway provider through a `HelmChartConfig`, and
+creates an `HTTPRoute` that sends `/v1/*` to the llm-d router. A Traefik `Middleware` (attached with an
+`ExtensionRef` filter) requires basic auth; the password is generated once and kept in a Secret.
+
+- It listens on the VM's port 80 as **plain HTTP**, so the password is not encrypted in transit.
+  For anything beyond a throwaway VM, use an SSH tunnel or add a TLS listener.
+- Whether the internet can reach port 80 depends on your cloud firewall.
+- `tools/teardown.sh gateway` removes the route and puts Traefik back to the k3s defaults.
+- Only the llm-d stack is routed (the route targets the llm-d router service).
 
 ## Observability
 

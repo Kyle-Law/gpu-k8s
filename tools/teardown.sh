@@ -2,6 +2,7 @@
 # Remove things. Explicit target required.
 #   tools/teardown.sh ollama   # deployment + service + PVC (downloaded models are deleted too)
 #   tools/teardown.sh llmd     # helm release + namespace
+#   tools/teardown.sh gateway         # HTTPRoute, auth, Traefik Gateway provider (back to k3s defaults)
 #   tools/teardown.sh observability   # Prometheus, Grafana, DCGM exporter (+ stored metrics)
 #   tools/teardown.sh k3s      # uninstall k3s entirely
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
@@ -17,6 +18,14 @@ case "$target" in
     helm uninstall "$GUIDE_NAME" -n "$NAMESPACE" || true
     kubectl delete namespace "$NAMESPACE" --ignore-not-found
     ;;
+  gateway)
+    need_kube
+    kubectl delete httproute llm-gateway -n "$NAMESPACE" --ignore-not-found
+    kubectl delete middleware.traefik.io llm-gateway-auth -n "$NAMESPACE" --ignore-not-found
+    kubectl delete secret llm-gateway-auth llm-gateway-credentials -n "$NAMESPACE" --ignore-not-found
+    kubectl delete helmchartconfig traefik -n kube-system --ignore-not-found   # Traefik reverts to k3s defaults
+    echo "Note: the Gateway API CRDs are left in place (cluster-wide and harmless)."
+    ;;
   observability)
     need_kube
     helm uninstall dcgm -n "$MONITORING_NS" || true
@@ -29,6 +38,6 @@ case "$target" in
     [ -x /usr/local/bin/k3s-uninstall.sh ] || die "k3s is not installed."
     /usr/local/bin/k3s-uninstall.sh
     ;;
-  *) die "Usage: tools/teardown.sh [ollama|llmd|observability|k3s]" ;;
+  *) die "Usage: tools/teardown.sh [ollama|llmd|gateway|observability|k3s]" ;;
 esac
 echo "Reminder: delete the cloud instance itself when you are done (stopping may still bill)."

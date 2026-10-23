@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Gateway API in front of the model, using k3s's bundled Traefik as the controller.
+#   1. Gateway API CRDs (standard channel, version Traefik documents support for)
+#   2. Traefik: turn on its Gateway provider and let routes from any namespace attach
+#   3. HTTPRoute  /v1/*  ->  llm-d router, protected by a basic-auth Middleware
+# Idempotent. The credentials are generated once and kept in a Secret.
+source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
+need_kube
+
+kubectl get deploy traefik -n kube-system >/dev/null 2>&1 \
+  || die "Traefik is not running in kube-system (was k3s installed with --disable traefik?)."
+
+step "Gateway API: CRDs ($GATEWAY_API_VERSION, standard channel)"
+kubectl apply --server-side -f \
+  "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
+
+step "Gateway API: enable Traefik's Gateway provider"
+# k3s merges a HelmChartConfig named after its bundled chart into the chart's values.
+# The default Gateway ('traefik-gateway', listener 'web' on :80) only accepts routes from
+# its own namespace, so allow all namespaces: our HTTPRoute lives next to the model.
+kubectl apply -f - <<'YAML'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesGateway:
+        enabled: true
+    gateway:
+      listeners:
+        web:
+          namespacePolicy:
+            from: All
+YAML
+
+info "Waiting for the k3s helm-controller to redeploy Traefik with the Gateway provider..."
+for _ in $(seq 1 60); do
+  kubectl get gateway traefik-gateway -n kube-system >/dev/null 2>&1 && break
+  sleep 5
+done
+kubectl get gateway traefik-gateway -n kube-system >/dev/null 2>&1 \
+  || die "Gateway 'traefik-gateway' never appeared. Check: kubectl -n kube-system get helmchart,job,pod | grep traefik"
+kubectl rollout status deploy/traefik -n kube-system --timeout=180s
+kubectl wait --for=condition=Programmed gateway/traefik-gateway -n kube-system --timeout=180s
+
+step "Gateway API: credentials + route to the llm-d router (namespace $NAMESPACE)"
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+if ! kubectl get secret llm-gateway-credentials -n "$NAMESPACE" >/dev/null 2>&1; then
+  pw=$(openssl rand -hex 16)
+  hash=$(printf '%s' "$pw" | openssl passwd -apr1 -stdin)
+  kubectl create secret generic llm-gateway-auth -n "$NAMESPACE" \
+    --from-literal=users="${GATEWAY_USER}:${hash}" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl create secret generic llm-gateway-credentials -n "$NAMESPACE" \
+    --from-literal=user="$GATEWAY_USER" --from-literal=password="$pw"
+  info "Generated credentials for user '$GATEWAY_USER' (show them with: tools/gateway.sh)"
+else
+  info "Credentials already exist; keeping them."
+fi
+
+kubectl apply -n "$NAMESPACE" -f - <<YAML
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: llm-gateway-auth
+spec:
+  basicAuth:
+    secret: llm-gateway-auth
+    removeHeader: true      # do not forward the credentials to the model server
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm-gateway
+spec:
+  parentRefs:
+    - name: traefik-gateway
+      namespace: kube-system
+      sectionName: web
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /v1}
+      filters:
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: llm-gateway-auth}
+      backendRefs:
+        - name: ${GUIDE_NAME}-epp
+          port: 80
+YAML
+
+kubectl wait --for=condition=Accepted httproute/llm-gateway -n "$NAMESPACE" --timeout=60s \
+  || info "HTTPRoute not Accepted yet; inspect: kubectl describe httproute llm-gateway -n $NAMESPACE"
+
+bash "$GPUK8S_ROOT/tools/gateway.sh"

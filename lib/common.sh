@@ -55,6 +55,9 @@ case "$GPU_PROFILE" in legacy|modern) ;; *) echo "ERROR: GPU_PROFILE must be leg
 : "${LLMD_BRANCH:=release-1.0}"
 : "${LLMD_DIR:=$HOME/llm-d}"
 : "${VLLM_EXTRA_ARGS:=}"              # extra space-separated vLLM flags
+: "${GATEWAY:=0}"                     # 1 = expose the model via Gateway API + Traefik (setup.sh --gateway)
+: "${GATEWAY_API_VERSION:=v1.6.3}"    # standard-channel CRDs; v1.6.3 is what Traefik 3.7 documents support for
+: "${GATEWAY_USER:=llm}"              # basic-auth user for the gateway (password is generated)
 : "${OBSERVABILITY:=0}"               # 1 = also install Prometheus + Grafana + DCGM (setup.sh --observability)
 : "${MONITORING_NS:=monitoring}"
 : "${KPS_CHART_VERSION:=}"            # kube-prometheus-stack chart version (empty = latest)

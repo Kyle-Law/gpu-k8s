@@ -42,6 +42,18 @@ if [ "$ran_any" = 0 ]; then
   if [ "$STACK" = none ]; then info "no inference stack deployed (STACK=none)"; else bad "no inference stack is Ready"; fi
 fi
 
+if kubectl get httproute llm-gateway -n "$NAMESPACE" >/dev/null 2>&1; then
+  step "Verify: gateway"
+  code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' http://127.0.0.1/v1/models || true)
+  if [ "$code" = 401 ]; then ok "unauthenticated request is rejected (401)"; else bad "expected 401 without credentials, got ${code:-none}"; fi
+  gw_user=$(kubectl get secret llm-gateway-credentials -n "$NAMESPACE" -o jsonpath='{.data.user}' | base64 -d)
+  gw_pw=$(kubectl get secret llm-gateway-credentials -n "$NAMESPACE" -o jsonpath='{.data.password}' | base64 -d)
+  code=$(curl -s -o /dev/null -m 15 -w '%{http_code}' -u "$gw_user:$gw_pw" http://127.0.0.1/v1/models || true)
+  if [ "$code" = 200 ]; then ok "authenticated request reaches the model (200)"
+  elif [ "${llmd_ready:-0}" -lt 1 ]; then warn "gateway answered $code, but llm-d is not Ready so that is expected"
+  else bad "expected 200 with credentials, got ${code:-none} (kubectl describe httproute llm-gateway -n $NAMESPACE)"; fi
+fi
+
 if kubectl get ns "$MONITORING_NS" >/dev/null 2>&1; then
   step "Verify: observability"
   not_ready=$(kubectl get pods -n "$MONITORING_NS" --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"' | wc -l)
