@@ -17,6 +17,12 @@ kubeProxy:
 
 grafana:
   defaultDashboardsTimezone: browser
+  grafana.ini:
+    server:
+      # The gateway serves Grafana at /grafana and strips that prefix before forwarding, so
+      # Grafana keeps serving from "/" (serve_from_sub_path stays off) but must generate
+      # /grafana/... links. Port-forwarding to :3000 still works at http://localhost:3000/.
+      root_url: "%(protocol)s://%(domain)s/grafana/"
   service:
     type: ClusterIP            # reach it with tools/grafana.sh (port-forward over SSH)
   sidecar:

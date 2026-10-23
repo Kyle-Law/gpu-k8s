@@ -16,8 +16,9 @@ git clone https://github.com/Kyle-Law/gpu-k8s.git && cd gpu-k8s
 ./setup.sh                  # validate -> host -> cluster -> llm-d -> verify
 ./setup.sh --stack ollama   # same, but Ollama instead
 ./setup.sh --stack none     # stop after the cluster (k3s + GPU plumbing)
-./setup.sh --gateway        # also expose the model via the Gateway API, behind basic auth
+./setup.sh --stack llmd-multi   # llm-d across 2+ GPUs on one node (see "Multiple GPUs")
 ./setup.sh --observability  # also install Prometheus + Grafana + GPU/vLLM metrics
+./setup.sh --gateway        # also serve /llm, /grafana, /prometheus on one address (basic auth)
 ```
 
 Pick **one** of these; they are alternatives, not a sequence.
@@ -52,13 +53,14 @@ script in it also runs on its own.
 | `host` | NVIDIA driver (exit 10 = reboot needed), base tools, container toolkit | `phases/10-host/` |
 | `cluster` | k3s, shell helpers, RuntimeClass + device plugin, GPU smoke test | `phases/20-cluster/` |
 | `inference` | The model server: llm-d (router + vLLM) **or** Ollama | `phases/30-inference/` |
-| `gateway` | *Opt-in.* Exposes the model through the Gateway API (k3s's Traefik as the controller) behind basic auth | `phases/35-gateway/` |
+| `multigpu` | *Alternative to `inference`, for 2+ GPUs* (`--stack llmd-multi`): topology check, then llm-d with tensor parallelism or one replica per GPU | `phases/32-multigpu/` |
 | `observability` | *Opt-in.* Prometheus, Grafana, DCGM GPU exporter, vLLM + router scraping, dashboard | `phases/40-observability/` |
+| `gateway` | *Opt-in.* One public address for the model, Grafana and Prometheus through the Gateway API (k3s's Traefik), behind basic auth | `phases/45-gateway/` |
 | `verify` | End-to-end checks: node, GPU, a real completion, metrics flowing | `phases/50-verify/` |
 
 ```bash
 ./setup.sh --list                    # show the plan
-./setup.sh --only validate           # run one phase (validate|host|cluster|inference|gateway|observability|verify)
+./setup.sh --only validate           # run one phase (validate|host|cluster|inference|observability|gateway|verify)
 ./setup.sh --from 06                 # resume at numbered step 06 (steps 00-07 are in validate/host/cluster)
 ./setup.sh --only verify             # re-run the health checks any time
 ```
@@ -69,13 +71,15 @@ script in it also runs on its own.
 setup.sh                   runner (--stack, --gateway, --observability, --only, --from, --no-verify, --list)
 config.env.example         copy to config.env to override defaults
 lib/common.sh              shared settings, GPU detection, helpers
+lib/llmd.sh                llm-d router + model-server steps shared by the 1-GPU and multi-GPU phases
 phases/
   00-validate/00-preflight.sh
   10-host/                 01-driver  02-base-tools  03-container-toolkit
   20-cluster/              04-k3s  05-shell-helpers  06-gpu-plugin  07-gpu-smoke-test
   30-inference/            llmd.sh  ollama.sh      (pick one; they share the single GPU)
-  35-gateway/              install.sh
+  32-multigpu/             check.sh  llmd.sh       (2+ GPUs: --stack llmd-multi)
   40-observability/        install.sh
+  45-gateway/              install.sh
   50-verify/               verify.sh
 manifests/
   ollama.yaml              Ollama PVC + Deployment + Service
@@ -93,23 +97,34 @@ tools/
 ## Gateway API
 
 ```bash
-./setup.sh --gateway           # as part of a full run
-./setup.sh --only gateway      # add it to a cluster that is already up
-tools/gateway.sh               # URL + generated credentials
-tools/gateway.sh test          # request through the gateway: 401 without credentials, answer with them
+./setup.sh --observability --gateway   # as part of a full run
+./setup.sh --only gateway              # add it to a cluster that is already up
+tools/gateway.sh                       # URLs + generated credentials
+tools/gateway.sh test                  # requests through the gateway: 401 without credentials, answers with them
 ```
 
-k3s's bundled Traefik doubles as the Gateway API controller, so there is nothing extra to run.
-The phase installs the Gateway API CRDs only if they are missing (recent k3s already ships them;
-`GATEWAY_API_VERSION`, default v1.6.3, is what Traefik 3.7 documents support for), turns on Traefik's Gateway provider through a `HelmChartConfig`, and
-creates an `HTTPRoute` that sends `/v1/*` to the llm-d router. A Traefik `Middleware` (attached with an
-`ExtensionRef` filter) requires basic auth; the password is generated once and kept in a Secret.
+One address, three paths. Every path asks for the same basic-auth login (user `llm`, generated password):
 
-- It listens on the VM's port 80 as **plain HTTP**, so the password is not encrypted in transit.
+| URL | Goes to |
+|---|---|
+| `http://<vm-ip>/llm/...` (also `/v1/...`) | the llm-d router, e.g. `/llm/v1/models`, `/llm/v1/chat/completions` |
+| `http://<vm-ip>/grafana/` | Grafana (then Grafana's own login: user `admin`, password from `tools/grafana.sh`) |
+| `http://<vm-ip>/prometheus/` | Prometheus |
+
+k3s's bundled Traefik doubles as the Gateway API controller, so there is nothing extra to run. The
+phase turns on Traefik's Gateway provider through a `HelmChartConfig` (k3s already ships the Gateway API
+CRDs; they are only installed if missing, `GATEWAY_API_VERSION`) and creates `HTTPRoute`s with a Traefik
+`Middleware` attached through an `ExtensionRef` filter. The path prefix is stripped before forwarding
+(`/grafana/x` reaches Grafana as `/x`), so the backends keep serving from `/`. Grafana is told its public
+path through `root_url` and Prometheus through `externalUrl`, so their links and redirects stay correct;
+port-forwards (`tools/grafana.sh`) still work at the root.
+
+- It listens on the VM's port 80 as **plain HTTP**, so passwords are not encrypted in transit.
   For anything beyond a throwaway VM, use an SSH tunnel or add a TLS listener.
 - Whether the internet can reach port 80 depends on your cloud firewall.
-- `tools/teardown.sh gateway` removes the route and puts Traefik back to the k3s defaults.
-- Only the llm-d stack is routed (the route targets the llm-d router service).
+- Set `PUBLIC_HOST` (a DNS name) if you do not want the VM's IP baked into Prometheus's external URL.
+- If you install observability after the gateway, the `/grafana` and `/prometheus` routes are added automatically.
+- `tools/teardown.sh gateway` removes the routes and puts Traefik back to the k3s defaults.
 
 ## Observability
 
@@ -135,6 +150,31 @@ What gets installed (namespace `monitoring`):
 Ollama has no Prometheus endpoint, so with `--stack ollama` only the GPU and cluster panels fill in.
 Remove it again with `tools/teardown.sh observability`.
 
+## Multiple GPUs
+
+For a node with 2+ GPUs (developed against 2 x Tesla V100-SXM2-16GB):
+
+```bash
+./setup.sh --stack llmd-multi                          # MULTIGPU_MODE=tp (default)
+MULTIGPU_MODE=replicas ./setup.sh --stack llmd-multi
+```
+
+| `MULTIGPU_MODE` | Layout | 2 x V100 16 GB default model | Use it for |
+|---|---|---|---|
+| `tp` | **one** vLLM replica, `--tensor-parallel-size` = GPU count | `Qwen/Qwen3-8B` (fp16, ~16 GB: does not fit one card) | running a model bigger than one GPU |
+| `replicas` | **one replica per GPU**; the llm-d router picks between them | `Qwen/Qwen3-4B` (~8 GB per card) | more throughput, and seeing llm-d's routing do something |
+
+`phases/32-multigpu/check.sh` runs first: it prints the GPU interconnect (`nvidia-smi topo -m`; `NV#`
+means NVLink, which tensor parallel wants), confirms Kubernetes advertises every GPU, and starts a pod
+holding all of them. `llmd.sh` then reuses the single-GPU stack's Deployment name, namespace and labels,
+so `tools/test.sh`, the gateway, observability (DCGM shows both GPUs) and `verify` work unchanged.
+
+- Put `STACK=llmd-multi` (and `MULTIGPU_MODE`) in `config.env` so `tools/` agree with how you deployed.
+- `TP_SIZE` / `REPLICAS` override the layout, as long as `TP_SIZE x REPLICAS` fits in the GPU count.
+- Tensor parallel hangs at start-up? Try `VLLM_EXTRA_ARGS=--disable-custom-all-reduce`.
+- V100s have no bf16 and no current-vLLM kernels, so the `legacy` profile (pinned vLLM, fp16, eager) still applies.
+- Not tested on real hardware yet: the manifests were rendered and checked, but a first run on the 2-GPU box may need tuning.
+
 ## Configuration
 
 Environment variables (or `config.env`) override the defaults. See `config.env.example`
@@ -156,7 +196,7 @@ bash phases/20-cluster/06-gpu-plugin.sh   # re-run a single step
 ./setup.sh --from 06              # resume from a step
 ```
 
-Only one stack can hold the single GPU at a time. Delete the cloud instance when
+Only one stack can hold the GPU(s) at a time. Delete the cloud instance when
 finished (stopping may still bill).
 
 ## Cleanup

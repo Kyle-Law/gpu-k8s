@@ -20,7 +20,9 @@ case "$target" in
     step "Switching to llm-d"
     scale_deploy ollama default 0
     kubectl wait --for=delete pod -l app=ollama -n default --timeout=90s >/dev/null 2>&1 || true
-    scale_deploy "$DECODE_DEPLOY" "$NAMESPACE" 1
+    # gpuk8s-replicas is set when the model server is deployed (2 for MULTIGPU_MODE=replicas)
+    replicas=$(kubectl get deploy "$DECODE_DEPLOY" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.gpuk8s-replicas}' 2>/dev/null || true)
+    scale_deploy "$DECODE_DEPLOY" "$NAMESPACE" "${replicas:-1}"
     kubectl rollout status deploy/"$DECODE_DEPLOY" -n "$NAMESPACE" --timeout=900s
     ;;
   *) die "Usage: tools/switch-stack.sh [ollama|llmd]" ;;

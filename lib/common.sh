@@ -24,9 +24,10 @@ export KUBECONFIG="$HOME/.kube/config"
 driver_ok() { command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; }
 
 detect_gpu() {
-  GPU_NAME="unknown"; GPU_CC=""; GPU_VRAM_MIB=0
+  GPU_NAME="unknown"; GPU_CC=""; GPU_VRAM_MIB=0; GPU_COUNT=0
   if driver_ok; then
     local line
+    GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
     line=$(nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || true)
     GPU_NAME=$(echo "$line" | cut -d, -f1 | sed 's/^ *//;s/ *$//')
     GPU_CC=$(echo "$line" | cut -d, -f2 | tr -d ' ')
@@ -48,7 +49,7 @@ fi
 case "$GPU_PROFILE" in legacy|modern) ;; *) echo "ERROR: GPU_PROFILE must be legacy|modern" >&2; exit 1 ;; esac
 
 # ---- settings (env vars / config.env override these defaults) ----------------
-: "${STACK:=llmd}"                    # llmd | ollama | none
+: "${STACK:=llmd}"                    # llmd | llmd-multi | ollama | none
 : "${HF_TOKEN:=}"                     # leave empty for public models (a WRONG token causes 401s)
 : "${NAMESPACE:=llm-d-quickstart}"
 : "${GUIDE_NAME:=quickstart}"
@@ -57,11 +58,35 @@ case "$GPU_PROFILE" in legacy|modern) ;; *) echo "ERROR: GPU_PROFILE must be leg
 : "${VLLM_EXTRA_ARGS:=}"              # extra space-separated vLLM flags
 : "${GATEWAY:=0}"                     # 1 = expose the model via Gateway API + Traefik (setup.sh --gateway)
 : "${GATEWAY_API_VERSION:=v1.6.3}"    # standard-channel CRDs; v1.6.3 is what Traefik 3.7 documents support for
+: "${PUBLIC_HOST:=}"                  # address users browse to (empty = Traefik's external IP; set a DNS name if you have one)
 : "${GATEWAY_USER:=llm}"              # basic-auth user for the gateway (password is generated)
 : "${OBSERVABILITY:=0}"               # 1 = also install Prometheus + Grafana + DCGM (setup.sh --observability)
 : "${MONITORING_NS:=monitoring}"
 : "${KPS_CHART_VERSION:=}"            # kube-prometheus-stack chart version (empty = latest)
 : "${DCGM_CHART_VERSION:=}"           # dcgm-exporter chart version (empty = latest)
+
+# llmd-multi (phases/32-multigpu): 2+ GPUs on one node.
+#   tp       : one vLLM replica split over all GPUs (tensor parallel) -> a model too big for one card
+#   replicas : one vLLM replica per GPU; the llm-d router balances requests between them
+: "${MULTIGPU_MODE:=tp}"
+case "$MULTIGPU_MODE" in tp|replicas) ;; *) echo "ERROR: MULTIGPU_MODE must be tp|replicas" >&2; exit 1 ;; esac
+if [ "$STACK" = llmd-multi ]; then
+  if [ "$MULTIGPU_MODE" = tp ]; then
+    : "${TP_SIZE:=$GPU_COUNT}"
+    : "${REPLICAS:=1}"
+    # Each tensor-parallel worker is a process with its own CUDA context and host-memory needs.
+    : "${MS_CPU_REQ:=4}"; : "${MS_MEM_REQ:=8Gi}"; : "${MS_MEM_LIM:=32Gi}"; : "${MS_SHM:=8Gi}"
+  else
+    : "${TP_SIZE:=1}"
+    : "${REPLICAS:=$GPU_COUNT}"
+  fi
+  if [ "$GPU_PROFILE" = legacy ]; then
+    # 16 GB V100s: Qwen3-8B in fp16 is ~16 GB, so it only fits when split over two cards (tp).
+    # With one replica per card use a model that fits in a single 16 GB card.
+    if [ "$MULTIGPU_MODE" = tp ]; then : "${MODEL:=Qwen/Qwen3-8B}"; else : "${MODEL:=Qwen/Qwen3-4B}"; fi
+    : "${MAX_MODEL_LEN:=8192}"
+  fi
+fi
 
 if [ "$GPU_PROFILE" = legacy ]; then
   : "${MODEL:=Qwen/Qwen3-0.6B}"
@@ -112,6 +137,13 @@ fix_home_ownership() {
   done
 }
 
+# public_host -> $PUBLIC_HOST, else Traefik's external IP, else localhost
+public_host() {
+  local h="$PUBLIC_HOST"
+  [ -n "$h" ] || h=$(kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+  echo "${h:-localhost}"
+}
+
 # check_url <url>  -> 0 if the host answers over HTTPS within 10 s (any HTTP status counts)
 check_url() { curl -sS -o /dev/null -m 10 "$1" 2>/dev/null; }
 
@@ -133,6 +165,6 @@ free_gpu() {
 }
 
 print_profile() {
-  info "GPU: ${GPU_NAME} (compute ${GPU_CC:-?}, ${GPU_VRAM_MIB} MiB)  ->  profile: ${GPU_PROFILE}"
+  info "GPU: ${GPU_COUNT} x ${GPU_NAME} (compute ${GPU_CC:-?}, ${GPU_VRAM_MIB} MiB each)  ->  profile: ${GPU_PROFILE}"
   info "Models: llm-d=${MODEL}  ollama=${OLLAMA_MODEL}"
 }

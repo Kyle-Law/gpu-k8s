@@ -16,7 +16,9 @@ step "Observability: Prometheus + Grafana (release 'kps', namespace $MONITORING_
 helm upgrade -i kps prometheus-community/kube-prometheus-stack \
   --namespace "$MONITORING_NS" --create-namespace \
   ${KPS_CHART_VERSION:+--version "$KPS_CHART_VERSION"} \
-  -f "$OBS/kps-values.yaml" --wait --timeout 10m
+  -f "$OBS/kps-values.yaml" \
+  --set prometheus.prometheusSpec.externalUrl="http://$(public_host)/prometheus" \
+  --wait --timeout 10m
 
 step "Observability: DCGM exporter (GPU utilisation, VRAM, power, temperature)"
 # Runs under the nvidia RuntimeClass so it can see the GPU without *requesting* it, which
@@ -58,6 +60,12 @@ if svc_json=$(kubectl get svc "${GUIDE_NAME}-epp" -n "$NAMESPACE" -o json 2>/dev
   fi
 else
   info "llm-d router not deployed yet; skipping router metrics (re-run this script after the stack is up)."
+fi
+
+# If the gateway is already installed, add the /grafana and /prometheus routes now.
+if kubectl get httproute llm-gateway -n "$NAMESPACE" >/dev/null 2>&1; then
+  step "Observability: adding /grafana and /prometheus to the gateway"
+  bash "$GPUK8S_ROOT/phases/45-gateway/install.sh"
 fi
 
 cat <<EOF

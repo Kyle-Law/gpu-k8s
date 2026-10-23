@@ -28,7 +28,7 @@ else warn "Disk free on /: ${free_gb} GiB (60+ recommended: images + model weigh
 step "Preflight: GPU"
 if grep -qsi '^0x10de' /sys/bus/pci/devices/*/vendor; then ok "NVIDIA device on the PCI bus"
 else bad "no NVIDIA PCI device found. Is this a GPU instance?"; fi
-if driver_ok; then ok "driver loaded: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)"
+if driver_ok; then ok "driver loaded: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1), ${GPU_COUNT} GPU(s)"
 else warn "NVIDIA driver not loaded yet; the host phase will install it (may need a reboot)"; fi
 
 step "Preflight: home directory"

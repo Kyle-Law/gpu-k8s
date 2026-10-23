@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Runs the setup in phases (see phases/):
-#   validate -> host -> cluster -> inference -> [gateway] -> [observability] -> verify
+#   validate -> host -> cluster -> inference -> [observability] -> [gateway] -> verify
 # The GPU is auto-detected (see lib/common.sh): V100-class cards get a legacy profile,
 # everything newer (A6000, L4, RTX, H100...) gets the modern profile.
 #
 #   ./setup.sh                          all phases, llm-d stack (default)
 #   ./setup.sh --stack ollama           Ollama instead of llm-d
 #   ./setup.sh --stack none             stop after the cluster (k3s + GPU plumbing)
-#   ./setup.sh --gateway                also expose the model via Gateway API (Traefik) behind basic auth
+#   ./setup.sh --stack llmd-multi       llm-d on 2+ GPUs (MULTIGPU_MODE=tp|replicas, see phases/32-multigpu)
 #   ./setup.sh --observability          also install Prometheus + Grafana + GPU/vLLM metrics
-#   ./setup.sh --only validate          run one phase: validate|host|cluster|inference|gateway|observability|verify
+#   ./setup.sh --gateway                also serve /llm /grafana /prometheus via Gateway API (basic auth)
+#   ./setup.sh --only validate          run one phase: validate|host|cluster|inference|observability|gateway|verify
 #   ./setup.sh --from 06                resume at numbered step 06 (steps 00-07 live in the first 3 phases)
 #   ./setup.sh --no-verify              skip the final verify phase
 #   ./setup.sh --list                   show what would run, then exit
@@ -18,7 +19,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 need_value() { if [ "$1" -lt 2 ]; then echo "$2 needs a value" >&2; exit 2; fi; }
 
 FROM=0; LIST=0; ONLY=""; NO_VERIFY=0
@@ -39,14 +40,14 @@ done
 # shellcheck disable=SC1091
 source "$ROOT/lib/common.sh"
 print_profile
-case "$STACK" in llmd|ollama|none) ;; *) die "Unknown stack '$STACK' (use llmd | ollama | none)" ;; esac
+case "$STACK" in llmd|llmd-multi|ollama|none) ;; *) die "Unknown stack '$STACK' (use llmd | llmd-multi | ollama | none)" ;; esac
 
 phase_dir() {
   case "$1" in
     validate) echo 00-validate ;;     host) echo 10-host ;;           cluster) echo 20-cluster ;;
-    inference) echo 30-inference ;;   gateway) echo 35-gateway ;;
-    observability) echo 40-observability ;;   verify) echo 50-verify ;;
-    *) die "Unknown phase '$1' (use validate|host|cluster|inference|gateway|observability|verify)" ;;
+    inference) echo 30-inference ;;   observability) echo 40-observability ;;
+    gateway) echo 45-gateway ;;   verify) echo 50-verify ;;
+    *) die "Unknown phase '$1' (use validate|host|cluster|inference|observability|gateway|verify)" ;;
   esac
 }
 [ -z "$ONLY" ] || phase_dir "$ONLY" >/dev/null
@@ -65,12 +66,16 @@ phase_enabled() {
 
 # Build the plan: one "phase|script" line per script, in order.
 plan=()
-for ph in validate host cluster inference gateway observability verify; do
+for ph in validate host cluster inference observability gateway verify; do
   phase_enabled "$ph" || continue
   dir="$ROOT/phases/$(phase_dir "$ph")"
   case "$ph" in
-    inference) [ "$STACK" != none ] || die "--only inference needs --stack llmd|ollama"
-               scripts=("$dir/$STACK.sh") ;;
+    inference) [ "$STACK" != none ] || die "--only inference needs --stack llmd|llmd-multi|ollama"
+               if [ "$STACK" = llmd-multi ]; then
+                 scripts=("$ROOT/phases/32-multigpu/check.sh" "$ROOT/phases/32-multigpu/llmd.sh")
+               else
+                 scripts=("$dir/$STACK.sh")
+               fi ;;
     gateway|observability) scripts=("$dir/install.sh") ;;
     verify) scripts=("$dir/verify.sh") ;;
     *) scripts=("$dir"/[0-9][0-9]-*.sh) ;;

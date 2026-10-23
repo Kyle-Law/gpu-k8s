@@ -23,6 +23,9 @@ case "$target" in
     kubectl delete httproute llm-gateway -n "$NAMESPACE" --ignore-not-found
     kubectl delete middleware.traefik.io llm-gateway-auth -n "$NAMESPACE" --ignore-not-found
     kubectl delete secret llm-gateway-auth llm-gateway-credentials -n "$NAMESPACE" --ignore-not-found
+    kubectl delete httproute monitoring-gateway -n "$MONITORING_NS" --ignore-not-found
+    kubectl delete middleware.traefik.io llm-gateway-auth -n "$MONITORING_NS" --ignore-not-found
+    kubectl delete secret llm-gateway-auth -n "$MONITORING_NS" --ignore-not-found
     kubectl delete helmchartconfig traefik -n kube-system --ignore-not-found   # Traefik reverts to k3s defaults
     echo "Note: the Gateway API CRDs are left in place (cluster-wide and harmless)."
     ;;

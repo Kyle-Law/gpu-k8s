@@ -18,10 +18,12 @@ case "$target" in
     ;;
   llmd)
     ip=$(kubectl get svc "${GUIDE_NAME}-epp" -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}')
-    payload=$(jq -n --arg m "$MODEL" --arg p "$prompt" '{model:$m, prompt:$p, max_tokens:40}')
     info "POST http://$ip/v1/completions"
     ok=0
     for _ in $(seq 1 24); do
+      # Ask the server which model it serves, so this works whatever MODEL the stack was deployed with.
+      served=$(curl -s -m 10 "http://$ip/v1/models" | jq -r '.data[0].id // empty' 2>/dev/null || true)
+      payload=$(jq -n --arg m "${served:-$MODEL}" --arg p "$prompt" '{model:$m, prompt:$p, max_tokens:40}')
       out=$(curl -s -m 60 "http://$ip/v1/completions" -H "Content-Type: application/json" -d "$payload" || true)
       if echo "$out" | grep -q '"choices"'; then echo "$out" | jq .; ok=1; break; fi
       sleep 5
