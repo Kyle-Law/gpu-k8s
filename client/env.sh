@@ -4,7 +4,8 @@
 #   LLM_HOST      VM address, e.g. 209.137.198.116              (required)
 #   LLM_USER      gateway user (default: llm)
 #   LLM_PASSWORD  gateway password; prompted for (hidden) if unset
-#   LLM_BASE      override the whole base URL (default: http://$LLM_HOST/llm)
+#   LLM_PATH      gateway path: llm (standalone router, default) or pool (Gateway mode)
+#   LLM_BASE      override the whole base URL (default: http://$LLM_HOST/$LLM_PATH)
 #   MODEL         model name (default: whatever the server reports)
 set -euo pipefail
 CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +16,7 @@ if [ -f "$CLIENT_DIR/client.env" ]; then source "$CLIENT_DIR/client.env"; fi
 : "${LLM_TIMEOUT:=300}"
 if [ -z "${LLM_BASE:-}" ]; then
   [ -n "${LLM_HOST:-}" ] || { echo "Set LLM_HOST (see client/client.env.example)" >&2; exit 2; }
-  LLM_BASE="http://${LLM_HOST}/llm"
+  LLM_BASE="http://${LLM_HOST}/${LLM_PATH:-llm}"
 fi
 LLM_BASE="${LLM_BASE%/}"
 

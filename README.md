@@ -55,12 +55,13 @@ script in it also runs on its own.
 | `inference` | The model server: llm-d (router + vLLM) **or** Ollama | `phases/30-inference/` |
 | `multigpu` | *Alternative to `inference`, for 2+ GPUs* (`--stack llmd-multi`): topology check, then llm-d with tensor parallelism or one replica per GPU | `phases/32-multigpu/` |
 | `observability` | *Opt-in.* Prometheus, Grafana, DCGM GPU exporter, vLLM + router scraping, dashboard | `phases/40-observability/` |
+| `inference-gateway` | *Opt-in.* llm-d in **Gateway mode** next to the standalone router: agentgateway + an `HTTPRoute` whose backend is the `InferencePool`, served at `/pool` | `phases/47-inference-gateway/` |
 | `gateway` | *Opt-in.* One public address for the model, Grafana and Prometheus through the Gateway API (k3s's Traefik), behind basic auth | `phases/45-gateway/` |
 | `verify` | End-to-end checks: node, GPU, a real completion, metrics flowing | `phases/50-verify/` |
 
 ```bash
 ./setup.sh --list                    # show the plan
-./setup.sh --only validate           # run one phase (validate|host|cluster|inference|observability|gateway|verify)
+./setup.sh --only validate           # run one phase (validate|host|cluster|inference|observability|gateway|inference-gateway|verify)
 ./setup.sh --from 06                 # resume at numbered step 06 (steps 00-07 are in validate/host/cluster)
 ./setup.sh --only verify             # re-run the health checks any time
 ```
@@ -80,10 +81,12 @@ phases/
   32-multigpu/             check.sh  llmd.sh       (2+ GPUs: --stack llmd-multi)
   40-observability/        install.sh
   45-gateway/              install.sh
+  47-inference-gateway/    install.sh
   50-verify/               verify.sh
 client/                    run on your laptop: models.sh  chat.sh  load.sh  (env.sh = shared helpers)
 manifests/
   ollama.yaml              Ollama PVC + Deployment + Service
+  inference-gateway/       gateway-mode router overrides
   observability/           kube-prometheus-stack values, vLLM PodMonitor, Grafana dashboard
 tools/
   status.sh                GPU, profile, pods, endpoints
@@ -93,7 +96,7 @@ tools/
   grafana.sh               port-forward Grafana / Prometheus
   metrics.sh               which LLM/GPU metrics Prometheus has; which dashboards will fill in
   check-image.sh           does an image's PyTorch support this GPU?
-  teardown.sh              remove ollama | llmd | gateway | observability | k3s
+  teardown.sh              remove ollama | llmd | gateway | inference-gateway | observability | k3s
 ```
 
 ## Gateway API
@@ -146,6 +149,31 @@ The password is asked for (hidden) unless `LLM_PASSWORD` is set in your shell; i
 or shown in `ps`. `-t` temperature, `-n` max tokens, `-s` system prompt, `-m` model (default: whatever the
 server reports), `--raw` prints the JSON. Qwen3 thinking is off unless you pass `--think`, since it spends
 many tokens. Run `client/load.sh` with the Grafana dashboards open to watch queues and the KV cache fill.
+
+## Gateway mode (InferencePool as the HTTPRoute backend)
+
+```bash
+./setup.sh --only inference-gateway     # needs the llm-d stack; uses the gateway phase's auth if present
+tools/gateway.sh test                   # now also answers through /pool
+LLM_PATH=pool client/chat.sh "hi"       # from your laptop
+```
+
+The default install runs llm-d's router in **standalone** mode: the `quickstart-epp` pod carries its own Envoy,
+and Traefik simply forwards `/llm` to that Service. This phase adds llm-d's **Gateway mode** beside it, so you can
+compare the two on the same vLLM pod(s):
+
+```
+/llm   Traefik -> quickstart-epp Service -> Envoy sidecar -> EPP picks a pod -> vLLM
+/pool  Traefik -> agentgateway Gateway -> HTTPRoute (backendRef: kind InferencePool) -> EPP (ext_proc) -> vLLM
+```
+
+Traefik cannot use an `InferencePool` as a backend, so the phase installs **agentgateway** (`AGENTGATEWAY_VERSION`,
+default v1.1.0, the version llm-d release-1.0 documents) with Inference Extension support, a `Gateway`
+named `llm-d-inference-gateway`, and llm-d's gateway-mode router chart as release `quickstart-gw` (its own EPP,
+`InferencePool` and `HTTPRoute`). The agentgateway Service is kept `ClusterIP` with `AgentgatewayParameters`
+(the same trick llm-d's OpenShift recipe uses), so it is only reachable through Traefik's authenticated `/pool`.
+On one GPU both paths hit the same pod; the difference starts to matter with
+`--stack llmd-multi` and `MULTIGPU_MODE=replicas`. Remove it with `tools/teardown.sh inference-gateway`.
 
 ## Observability
 

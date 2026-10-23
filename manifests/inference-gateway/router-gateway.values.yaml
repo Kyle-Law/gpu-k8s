@@ -1,0 +1,15 @@
+## gpu-k8s overrides for the llm-d router in GATEWAY mode (chart llm-d-router-gateway).
+## Layered after llm-d's base.values.yaml and optimized-baseline.values.yaml.
+
+router:
+  # optimized-baseline adds a port 80 -> 8081 for the standalone chart's Envoy sidecar.
+  # Gateway mode has no sidecar (the Gateway's proxy talks to the EPP), so drop it.
+  extraServicePorts: []
+  epp:
+    # llm-d's defaults (4 CPU / 8 Gi) are sized for big clusters; one GPU needs far less.
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        memory: 2Gi

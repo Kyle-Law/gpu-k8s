@@ -3,6 +3,7 @@
 #   tools/teardown.sh ollama   # deployment + service + PVC (downloaded models are deleted too)
 #   tools/teardown.sh llmd     # helm release + namespace
 #   tools/teardown.sh gateway         # HTTPRoute, auth, Traefik Gateway provider (back to k3s defaults)
+#   tools/teardown.sh inference-gateway   # agentgateway + gateway-mode router (/pool); standalone /llm stays
 #   tools/teardown.sh observability   # Prometheus, Grafana, DCGM exporter (+ stored metrics)
 #   tools/teardown.sh k3s      # uninstall k3s entirely
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
@@ -29,6 +30,17 @@ case "$target" in
     kubectl delete helmchartconfig traefik -n kube-system --ignore-not-found   # Traefik reverts to k3s defaults
     echo "Note: the Gateway API CRDs are left in place (cluster-wide and harmless)."
     ;;
+  inference-gateway)
+    need_kube
+    kubectl delete httproute pool-gateway -n "$NAMESPACE" --ignore-not-found
+    helm uninstall "${GUIDE_NAME}-gw" -n "$NAMESPACE" || true     # EPP + InferencePool + HTTPRoute
+    kubectl delete gateway llm-d-inference-gateway -n "$NAMESPACE" --ignore-not-found
+    kubectl delete agentgatewayparameters agentgateway-params -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+    helm uninstall agentgateway -n agentgateway-system || true
+    helm uninstall agentgateway-crds -n agentgateway-system || true
+    kubectl delete namespace agentgateway-system --ignore-not-found
+    kubectl delete gatewayclass agentgateway --ignore-not-found
+    ;;
   observability)
     need_kube
     helm uninstall dcgm -n "$MONITORING_NS" || true
@@ -41,6 +53,6 @@ case "$target" in
     [ -x /usr/local/bin/k3s-uninstall.sh ] || die "k3s is not installed."
     /usr/local/bin/k3s-uninstall.sh
     ;;
-  *) die "Usage: tools/teardown.sh [ollama|llmd|gateway|observability|k3s]" ;;
+  *) die "Usage: tools/teardown.sh [ollama|llmd|gateway|inference-gateway|observability|k3s]" ;;
 esac
 echo "Reminder: delete the cloud instance itself when you are done (stopping may still bill)."

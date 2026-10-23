@@ -47,6 +47,9 @@ for url in \
   https://registry.k8s.io/v2/ ; do
   if check_url "$url"; then ok "$url"; else bad "cannot reach $url"; fi
 done
+if [ "$INFERENCE_GATEWAY" = 1 ]; then
+  if check_url https://cr.agentgateway.dev/v2/; then ok "https://cr.agentgateway.dev"; else bad "cannot reach https://cr.agentgateway.dev (agentgateway charts)"; fi
+fi
 if [ "$OBSERVABILITY" = 1 ]; then
   for url in https://prometheus-community.github.io/helm-charts/index.yaml \
              https://nvidia.github.io/dcgm-exporter/helm-charts/index.yaml; do

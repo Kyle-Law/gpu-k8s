@@ -21,6 +21,9 @@ case "${1:-info}" in
     info "Plain HTTP on port 80: credentials are NOT encrypted in transit."
     info "Credentials : $user / $pw"
     info "LLM API     : http://$host/llm/v1/...      (also http://$host/v1/...)"
+    if kubectl get httproute pool-gateway -n "$NAMESPACE" >/dev/null 2>&1; then
+      info "Gateway mode: http://$host/pool/v1/...     (agentgateway -> InferencePool; /llm is standalone)"
+    fi
     if [ "$has_monitoring" = 1 ]; then
       info "Grafana     : http://$host/grafana/        (then Grafana's own login; user admin, password via tools/grafana.sh)"
       info "Prometheus  : http://$host/prometheus/"
@@ -41,6 +44,13 @@ case "${1:-info}" in
       payload=$(jq -n --arg m "$served" --arg p "$prompt" \
         '{model:$m, messages:[{role:"user",content:$p}], max_tokens:60, chat_template_kwargs:{enable_thinking:false}}')
       curl -s -m 120 -u "$user:$pw" "$base/llm/v1/chat/completions" -H 'Content-Type: application/json' -d "$payload" \
+        | jq -r '.choices[0].message.content // .'
+    fi
+    if kubectl get httproute pool-gateway -n "$NAMESPACE" >/dev/null 2>&1 && [ -n "$served" ]; then
+      echo "--- /pool (gateway mode, InferencePool backend):"
+      payload=$(jq -n --arg m "$served" --arg p "$prompt" \
+        '{model:$m, messages:[{role:"user",content:$p}], max_tokens:60, chat_template_kwargs:{enable_thinking:false}}')
+      curl -s -m 120 -u "$user:$pw" "$base/pool/v1/chat/completions" -H 'Content-Type: application/json' -d "$payload" \
         | jq -r '.choices[0].message.content // .'
     fi
     if [ "$has_monitoring" = 1 ]; then

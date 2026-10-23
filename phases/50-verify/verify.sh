@@ -50,6 +50,21 @@ if kubectl get httproute llm-gateway -n "$NAMESPACE" >/dev/null 2>&1; then
   fi
 fi
 
+if kubectl get httproute "${GUIDE_NAME}-gw" -n "$NAMESPACE" >/dev/null 2>&1; then
+  step "Verify: inference gateway (llm-d Gateway mode)"
+  kind=$(kubectl get httproute "${GUIDE_NAME}-gw" -n "$NAMESPACE" -o jsonpath='{.spec.rules[0].backendRefs[0].kind}')
+  resolved=$(kubectl get httproute "${GUIDE_NAME}-gw" -n "$NAMESPACE" \
+    -o jsonpath='{.status.parents[0].conditions[?(@.type=="ResolvedRefs")].status}')
+  if [ "$kind" = InferencePool ] && [ "$resolved" = True ]; then ok "HTTPRoute ${GUIDE_NAME}-gw uses an InferencePool backend and it resolves"
+  else bad "HTTPRoute ${GUIDE_NAME}-gw: backend kind=${kind:-?} ResolvedRefs=${resolved:-?}"; fi
+  if kubectl get httproute pool-gateway -n "$NAMESPACE" >/dev/null 2>&1; then
+    gw_user=$(kubectl get secret llm-gateway-credentials -n "$NAMESPACE" -o jsonpath='{.data.user}' | base64 -d)
+    gw_pw=$(kubectl get secret llm-gateway-credentials -n "$NAMESPACE" -o jsonpath='{.data.password}' | base64 -d)
+    code=$(curl -s -o /dev/null -m 15 -w '%{http_code}' -u "$gw_user:$gw_pw" http://127.0.0.1/pool/v1/models || true)
+    if [ "$code" = 200 ]; then ok "/pool reaches the model through agentgateway (200)"; else bad "/pool returned ${code:-none}"; fi
+  fi
+fi
+
 if kubectl get ns "$MONITORING_NS" >/dev/null 2>&1; then
   step "Verify: observability"
   not_ready=$(kubectl get pods -n "$MONITORING_NS" --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"' | wc -l)
