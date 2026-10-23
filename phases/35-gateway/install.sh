@@ -101,7 +101,10 @@ spec:
           port: 80
 YAML
 
-kubectl wait --for=condition=Accepted httproute/llm-gateway -n "$NAMESPACE" --timeout=60s \
+# An HTTPRoute reports Accepted per parent Gateway (status.parents[]), not at the top level,
+# so `kubectl wait --for=condition=Accepted` can never succeed.
+kubectl wait httproute/llm-gateway -n "$NAMESPACE" --timeout=60s \
+  --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True \
   || info "HTTPRoute not Accepted yet; inspect: kubectl describe httproute llm-gateway -n $NAMESPACE"
 
 bash "$GPUK8S_ROOT/tools/gateway.sh"
