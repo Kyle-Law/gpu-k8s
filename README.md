@@ -168,10 +168,13 @@ compare the two on the same vLLM pod(s):
 ```
 
 Traefik cannot use an `InferencePool` as a backend, so the phase installs **agentgateway** (`AGENTGATEWAY_VERSION`,
-default v1.1.0, the version llm-d release-1.0 documents) with Inference Extension support, a `Gateway`
+default v1.6.0) with Inference Extension support, a `Gateway`
 named `llm-d-inference-gateway`, and llm-d's gateway-mode router chart as release `quickstart-gw` (its own EPP,
 `InferencePool` and `HTTPRoute`). The agentgateway Service is kept `ClusterIP` with `AgentgatewayParameters`
 (the same trick llm-d's OpenShift recipe uses), so it is only reachable through Traefik's authenticated `/pool`.
+llm-d release-1.0 documents agentgateway v1.1.0, but that controller lists `TCPRoute` at `v1alpha2`; the Gateway API
+v1.6 CRDs that k3s ships serve `TCPRoute` only at `v1`, so v1.1.0 waits forever and crash-loops on its startup probe.
+v1.6.0 watches the `v1` APIs.
 On one GPU both paths hit the same pod; the difference starts to matter with
 `--stack llmd-multi` and `MULTIGPU_MODE=replicas`. Remove it with `tools/teardown.sh inference-gateway`.
 

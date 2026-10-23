@@ -61,7 +61,8 @@ case "$GPU_PROFILE" in legacy|modern) ;; *) echo "ERROR: GPU_PROFILE must be leg
 : "${PUBLIC_HOST:=}"                  # address users browse to (empty = Traefik's external IP; set a DNS name if you have one)
 : "${GATEWAY_USER:=llm}"              # basic-auth user for the gateway (password is generated)
 : "${INFERENCE_GATEWAY:=0}"           # 1 = llm-d Gateway mode via agentgateway at /pool (setup.sh --inference-gateway)
-: "${AGENTGATEWAY_VERSION:=v1.1.0}"   # the version llm-d release-1.0 documents (docs/infrastructure/gateway/agentgateway.md)
+: "${AGENTGATEWAY_VERSION:=v1.6.0}"   # not llm-d's documented v1.1.0: that one watches TCPRoute v1alpha2, which the
+                                      # Gateway API v1.6 CRDs k3s ships no longer serve, so its controller never gets Ready
 : "${OBSERVABILITY:=0}"               # 1 = also install Prometheus + Grafana + DCGM (setup.sh --observability)
 : "${MONITORING_NS:=monitoring}"
 : "${KPS_CHART_VERSION:=}"            # kube-prometheus-stack chart version (empty = latest)
