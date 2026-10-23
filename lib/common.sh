@@ -144,6 +144,20 @@ public_host() {
   echo "${h:-localhost}"
 }
 
+# prom_get <api-path>  e.g. prom_get '/api/v1/label/__name__/values'
+# Queries Prometheus through the Kubernetes API's service proxy, so nothing has to run inside
+# the (minimal, no wget/curl) Prometheus container and no port-forward is needed.
+prom_get() {
+  kubectl get --raw "/api/v1/namespaces/$MONITORING_NS/services/kps-kube-prometheus-stack-prometheus:9090/proxy$1"
+}
+
+# prom_count <promql>  -> number of series the expression returns ("" if Prometheus is unreachable)
+prom_count() {
+  local q
+  q=$(jq -rn --arg q "count($1)" '$q|@uri')
+  prom_get "/api/v1/query?query=$q" 2>/dev/null | jq -r '.data.result[0].value[1] // "0"' 2>/dev/null || true
+}
+
 # check_url <url>  -> 0 if the host answers over HTTPS within 10 s (any HTTP status counts)
 check_url() { curl -sS -o /dev/null -m 10 "$1" 2>/dev/null; }
 

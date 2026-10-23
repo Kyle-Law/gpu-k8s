@@ -9,16 +9,6 @@ ok()   { printf '    [ ok ] %s\n' "$*"; }
 warn() { printf '    [warn] %s\n' "$*"; }
 bad()  { printf '    [FAIL] %s\n' "$*"; fails=$((fails + 1)); }
 
-# prom_count <promql> -> number of series, or "" if Prometheus can't be queried
-prom_count() {
-  local pod
-  pod=$(kubectl get pod -n "$MONITORING_NS" -l app.kubernetes.io/name=prometheus -o name 2>/dev/null | head -1)
-  [ -n "$pod" ] || return 0
-  kubectl exec -n "$MONITORING_NS" "$pod" -c prometheus -- \
-    wget -qO- --post-data="query=count($1)" http://localhost:9090/api/v1/query 2>/dev/null \
-    | jq -r '.data.result[0].value[1] // "0"' 2>/dev/null || true
-}
-
 step "Verify: cluster + GPU"
 if kubectl get node 2>/dev/null | grep -q ' Ready'; then ok "node Ready"; else bad "node not Ready"; fi
 gpus=$(kubectl get node -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}' 2>/dev/null || true)

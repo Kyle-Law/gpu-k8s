@@ -5,10 +5,8 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 need_kube
 
-pod=$(kubectl get pod -n "$MONITORING_NS" -l app.kubernetes.io/name=prometheus -o name 2>/dev/null | head -1)
-[ -n "$pod" ] || die "Prometheus not found in namespace $MONITORING_NS. Run: ./setup.sh --only observability"
-names=$(kubectl exec -n "$MONITORING_NS" "$pod" -c prometheus -- \
-  wget -qO- http://localhost:9090/api/v1/label/__name__/values | jq -r '.data[]')
+names=$(prom_get '/api/v1/label/__name__/values' | jq -r '.data[]') \
+  || die "Cannot reach Prometheus in namespace $MONITORING_NS. Run: ./setup.sh --only observability"
 
 if [ -n "${1:-}" ]; then
   grep -E "$1" <<<"$names" || echo "(no metric names match '$1')"
