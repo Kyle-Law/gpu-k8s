@@ -9,8 +9,18 @@
 #   MODEL         model name (default: whatever the server reports)
 set -euo pipefail
 CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck disable=SC1091
-if [ -f "$CLIENT_DIR/client.env" ]; then source "$CLIENT_DIR/client.env"; fi
+# client.env fills in defaults; anything already set in the environment wins
+# (so `LLM_PATH=pool client/chat.sh ...` works even if client.env sets LLM_PATH).
+if [ -f "$CLIENT_DIR/client.env" ]; then
+  _keep=()
+  for _k in LLM_HOST LLM_USER LLM_PASSWORD LLM_PATH LLM_BASE LLM_TIMEOUT MODEL TEMP MAX_TOKENS SYSTEM STREAM THINK CONCURRENCY UNIQUE; do
+    if [ -n "${!_k+x}" ]; then _keep+=("$_k=${!_k}"); fi
+  done
+  # shellcheck disable=SC1091
+  source "$CLIENT_DIR/client.env"
+  for _kv in ${_keep[@]+"${_keep[@]}"}; do export "${_kv%%=*}=${_kv#*=}"; done
+  unset _keep _k _kv
+fi
 
 : "${LLM_USER:=llm}"
 : "${LLM_TIMEOUT:=300}"

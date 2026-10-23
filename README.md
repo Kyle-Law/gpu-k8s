@@ -143,6 +143,7 @@ client/chat.sh -t 0.2 -n 300 -s "You are terse." "Why is the sky blue?"
 client/chat.sh --stream "Tell me a short story"    # tokens as they arrive + time to first token
 client/chat.sh --think "How many r's in strawberry?"   # show Qwen3's reasoning (grey)
 client/load.sh 32 "Write a poem"                   # 32 concurrent requests -> tok/s, p50/p95
+UNIQUE=1 MAX_TOKENS=1500 client/load.sh 48 "$LONG"  # fill the KV cache (unique prefixes defeat prefix caching)
 ```
 
 The password is asked for (hidden) unless `LLM_PASSWORD` is set in your shell; it is never written to a file
