@@ -81,6 +81,7 @@ phases/
   40-observability/        install.sh
   45-gateway/              install.sh
   50-verify/               verify.sh
+client/                    run on your laptop: models.sh  chat.sh  load.sh  (env.sh = shared helpers)
 manifests/
   ollama.yaml              Ollama PVC + Deployment + Service
   observability/           kube-prometheus-stack values, vLLM PodMonitor, Grafana dashboard
@@ -126,6 +127,25 @@ port-forwards (`tools/grafana.sh`) still work at the root.
 - Set `PUBLIC_HOST` (a DNS name) if you do not want the VM's IP baked into Prometheus's external URL.
 - If you install observability after the gateway, the `/grafana` and `/prometheus` routes are added automatically.
 - `tools/teardown.sh gateway` removes the routes and puts Traefik back to the k3s defaults.
+
+## Client scripts (run these on your laptop)
+
+`client/` talks to the gateway from macOS or Linux. It needs only `bash`, `curl` and `jq` (`brew install jq`).
+
+```bash
+cp client/client.env.example client/client.env     # git-ignored; set LLM_HOST=<vm-ip>
+client/models.sh                                   # checks auth (401 without, 200 with) and lists the model
+client/chat.sh "Explain Kubernetes in one sentence."
+client/chat.sh -t 0.2 -n 300 -s "You are terse." "Why is the sky blue?"
+client/chat.sh --stream "Tell me a short story"    # tokens as they arrive + time to first token
+client/chat.sh --think "How many r's in strawberry?"   # show Qwen3's reasoning (grey)
+client/load.sh 32 "Write a poem"                   # 32 concurrent requests -> tok/s, p50/p95
+```
+
+The password is asked for (hidden) unless `LLM_PASSWORD` is set in your shell; it is never written to a file
+or shown in `ps`. `-t` temperature, `-n` max tokens, `-s` system prompt, `-m` model (default: whatever the
+server reports), `--raw` prints the JSON. Qwen3 thinking is off unless you pass `--think`, since it spends
+many tokens. Run `client/load.sh` with the Grafana dashboards open to watch queues and the KV cache fill.
 
 ## Observability
 
